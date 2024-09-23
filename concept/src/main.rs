@@ -40,18 +40,15 @@ fn create_output_dir(out_dir: &Path) -> std::io::Result<()> {
     create_dir_all(out_dir)
 }
 
-// Reads the file and processes it (encodes to Base64, chunks, and saves chunks)
+// Processes the file by reading it in chunks, encoding each chunk in Base64, and saving it
 fn process_file(path: &Path, out_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
-    // Read the file contents
-    let file_contents = read_file_contents(path)?;
-    
-    // Convert file contents to Base64
-    let base64_data = encode_base64(&file_contents);
+    // Open the file
+    let mut file = File::open(path)?;
 
-    // Print file size information
-    print_file_size(path, &file_contents, &base64_data);
+    // Define chunk size (in bytes)
+    let chunk_size = 10;
 
-    // Chunk the Base64 data and save each chunk
+    // Get file stem and extension safely
     let file_stem = path.file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("unknown_file");
@@ -59,54 +56,51 @@ fn process_file(path: &Path, out_dir: &Path) -> Result<(), Box<dyn std::error::E
         .and_then(|e| e.to_str())
         .unwrap_or("txt");
 
-    save_chunks(&base64_data, file_stem, file_extension, out_dir)?;
+    let mut buffer = vec![0u8; chunk_size];  // Temporary buffer for reading chunks
+    let mut chunk_index = 1;  // Track chunk number
+
+    // Read the file chunk by chunk
+    while let Ok(bytes_read) = file.read(&mut buffer) {
+        if bytes_read == 0 {
+            break;  // Exit the loop when we've read the entire file
+        }
+
+        // Only take the bytes that were read in case it's less than the buffer size
+        let chunk_data = &buffer[..bytes_read];
+
+        // Encode the chunk to Base64
+        let base64_data = encode_base64(chunk_data);
+
+        // Save the Base64 chunk
+        save_chunk(&base64_data, file_stem, file_extension, out_dir, chunk_index)?;
+
+        chunk_index += 1;  // Move to the next chunk
+    }
 
     Ok(())
 }
 
-// Reads the contents of the file into a Vec<u8>
-fn read_file_contents(path: &Path) -> Result<Vec<u8>, std::io::Error> {
-    let mut file = File::open(path)?;
-    let mut buffer = Vec::new();
-    file.read_to_end(&mut buffer)?;
-    Ok(buffer)
-}
-
-// Encodes the file contents to Base64
+// Encodes a chunk of file data to Base64
 fn encode_base64(contents: &[u8]) -> String {
     base64::encode(contents)
 }
 
-// Prints the original file size and the Base64 size
-fn print_file_size(path: &Path, original: &[u8], base64_encoded: &str) {
-    let original_size = original.len();
-    let base64_size = base64_encoded.len();
-    println!(
-        "File: {:?}, Original Size: {} bytes, Base64 Size: {} bytes",
-        path.display(),
-        original_size,
-        base64_size
+// Saves a Base64-encoded chunk as a file
+fn save_chunk(base64_data: &str, file_stem: &str, file_extension: &str, out_dir: &Path, chunk_index: usize) -> Result<(), std::io::Error> {
+    // Construct the chunk filename and path in the 'out' directory
+    let chunk_filename = format!(
+        "{}_chunk_{}.{}",
+        file_stem,
+        chunk_index,  // Number the chunks sequentially
+        file_extension
     );
-}
+    let chunk_path = out_dir.join(chunk_filename);
 
-// Chunks Base64 data into 10-byte chunks and saves them as files
-fn save_chunks(base64_data: &str, file_stem: &str, file_extension: &str, out_dir: &Path) -> Result<(), std::io::Error> {
-    let chunk_size = 10;
-    let chunks = base64_data.as_bytes().chunks(chunk_size).enumerate();
+    // Save the Base64 data to the chunk file
+    let mut chunk_file = File::create(&chunk_path)?;
+    chunk_file.write_all(base64_data.as_bytes())?;
 
-    for (i, chunk) in chunks {
-        let chunk_filename = format!(
-            "{}_chunk_{}.{}",
-            file_stem,
-            i + 1,  // Chunk numbering starts from 1
-            file_extension
-        );
-        let chunk_path = out_dir.join(chunk_filename);
+    println!("Chunk saved: {:?}", chunk_path.display());
 
-        let mut chunk_file = File::create(&chunk_path)?;
-        chunk_file.write_all(chunk)?;
-
-        println!("Chunk saved: {:?}", chunk_path.display());
-    }
     Ok(())
 }
